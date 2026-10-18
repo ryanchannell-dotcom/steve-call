@@ -26,7 +26,7 @@ h1{margin:0;font-size:28px;font-weight:600}
 <main>
 <h1>Steve</h1>
 <button id="btn" type="button">Talk</button>
-<div id="status">Tap Talk once. After that, just say "Hey Steve".</div>
+<div id="status">First time only: tap Talk and allow the microphone. After that, opening Steve is enough: just say "Hey Steve".</div>
 <div id="said"></div>
 <button id="off" type="button" hidden>Stop listening</button>
 </main>
@@ -113,7 +113,7 @@ off.addEventListener("click", async () => { endedByUser = true; if (convo) { try
 
 try {
   const p = await navigator.permissions.query({ name: "microphone" });
-  if (p.state === "granted") { show('Ready. Tap anywhere once, then just say "Hey Steve" from now on.'); document.body.addEventListener("click", function once(ev) { document.body.removeEventListener("click", once); if (ev.target === btn || ev.target === off) return; start(); }); }
+  if (p.state === "granted") { diag("auto-listen"); listenForWake(); }
 } catch (e) {}
 </script>
 </body>
