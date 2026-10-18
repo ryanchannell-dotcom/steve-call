@@ -7,31 +7,32 @@
 <link rel="manifest" href="manifest.json">
 <title>Steve</title>
 <style>
-:root{--bg:#1b1b19;--text:#ecebe6;--muted:#a9a79f;--go:#3B6D11;--stop:#A32D2D;--warn:#EF9F27}
+:root{--bg:#1b1b19;--text:#ecebe6;--muted:#a9a79f;--go:#3B6D11;--stop:#A32D2D;--warn:#EF9F27;--wait:#185FA5}
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:18px/1.5 -apple-system,"Segoe UI",Roboto,Arial,sans-serif}
-main{min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px 16px;text-align:center;gap:20px}
+main{min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px 16px;text-align:center;gap:18px}
 h1{margin:0;font-size:28px;font-weight:600}
-#btn{width:240px;height:240px;border-radius:50%;border:0;background:var(--go);color:#fff;font-size:30px;font-weight:600;cursor:pointer;touch-action:manipulation}
+#btn{width:240px;height:240px;border-radius:50%;border:0;background:var(--go);color:#fff;font-size:28px;font-weight:600;cursor:pointer;touch-action:manipulation}
 #btn.on{background:var(--stop)}
 #btn.busy{background:#5f5e5a}
-#status{min-height:56px;max-width:420px;color:var(--muted)}
+#btn.wake{background:var(--wait)}
+#status{min-height:56px;max-width:440px;color:var(--muted)}
 #status.err{color:var(--warn)}
-#said{max-width:420px;font-size:15px;color:var(--muted)}
+#said{max-width:440px;font-size:15px;color:var(--muted)}
+#off{background:none;border:0;color:var(--muted);text-decoration:underline;font-size:15px;cursor:pointer}
 </style>
 </head>
 <body>
 <main>
 <h1>Steve</h1>
-<button id="btn" type="button" aria-live="polite">Talk</button>
-<div id="status">Tap Talk. Allow the microphone the first time.</div>
+<button id="btn" type="button">Talk</button>
+<div id="status">Tap Talk once. After that, just say "Hey Steve".</div>
 <div id="said"></div>
+<button id="off" type="button" hidden>Stop listening</button>
 </main>
 <script>
 window.diag = function (step, detail) {
-  try {
-    fetch("https://ntfy.sh/steve-diag-69a3a68e16f2b689", { method: "POST", body: JSON.stringify({ step: step, detail: String(detail || "").slice(0, 300), ua: navigator.userAgent, secure: window.isSecureContext, media: !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia) }) });
-  } catch (e) {}
+  try { fetch("https://ntfy.sh/steve-diag-69a3a68e16f2b689", { method: "POST", body: JSON.stringify({ step: step, detail: String(detail || "").slice(0, 300), ua: navigator.userAgent }) }); } catch (e) {}
 };
 diag("page-open");
 window.addEventListener("error", function (e) { diag("page-error", e.message); });
@@ -42,37 +43,78 @@ setTimeout(function () { if (!window.steveReady) { diag("library-not-loaded"); v
 import { Conversation } from "https://cdn.jsdelivr.net/npm/@elevenlabs/client@1.26.0/+esm";
 window.steveReady = true; diag("library-loaded");
 const AGENT = "agent_4401m570wdz7f3vsw92hrxqpkp6y";
-const btn = document.getElementById("btn"), st = document.getElementById("status"), said = document.getElementById("said");
-let convo = null;
+const btn = document.getElementById("btn"), st = document.getElementById("status"), said = document.getElementById("said"), off = document.getElementById("off");
+let convo = null, starting = false, rec = null, wakeWanted = false, lock = null, endedByUser = false;
+
 function show(msg, err) { st.textContent = msg; st.className = err ? "err" : ""; if (err) diag("shown-error", msg); }
+async function keepAwake() { try { if ("wakeLock" in navigator && !lock) { lock = await navigator.wakeLock.request("screen"); lock.addEventListener("release", () => { lock = null; }); } } catch (e) {} }
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && (convo || wakeWanted)) keepAwake(); });
+
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+function listenForWake() {
+  wakeWanted = true; off.hidden = false;
+  btn.className = "wake"; btn.textContent = "Listening";
+  if (!SR) { show("Say-his-name isn't supported in this browser. Tap the button to talk."); btn.className = ""; btn.textContent = "Talk"; return; }
+  show('Say "Hey Steve" to talk, or tap the button.');
+  keepAwake();
+  try { if (rec) rec.abort(); } catch (e) {}
+  rec = new SR(); rec.lang = "en-AU"; rec.continuous = true; rec.interimResults = true;
+  rec.onresult = (ev) => {
+    for (let i = ev.resultIndex; i < ev.results.length; i++) {
+      const t = ev.results[i][0].transcript.toLowerCase();
+      if (/\b(steve|stevo|stevie)\b/.test(t)) { diag("wake-heard", t); wakeWanted = false; try { rec.abort(); } catch (e) {} start(); return; }
+    }
+  };
+  rec.onerror = (e) => { if (e.error === "not-allowed") { show("The microphone is blocked. Tap the lock next to the web address, allow Microphone, then tap Talk.", true); wakeWanted = false; } };
+  rec.onend = () => { if (wakeWanted && !convo && !starting) setTimeout(() => { try { rec.start(); } catch (e) {} }, 300); };
+  try { rec.start(); } catch (e) {}
+}
+function stopAll() {
+  wakeWanted = false; off.hidden = true;
+  try { if (rec) rec.abort(); } catch (e) {}
+  try { if (lock) lock.release(); } catch (e) {}
+  btn.className = ""; btn.textContent = "Talk"; show("Stopped. Tap Talk when you want Steve.");
+}
+
 async function start() {
+  if (starting || convo) return;
+  starting = true; endedByUser = false;
+  try { if (rec) rec.abort(); } catch (e) {}
   btn.className = "busy"; btn.textContent = "..."; show("Connecting to Steve..."); diag("talk-tapped");
-  try {
-    await navigator.mediaDevices.getUserMedia({ audio: true });
-  } catch (e) {
-    btn.className = ""; btn.textContent = "Talk";
-    show("The microphone is blocked. Tap the lock icon next to the web address, allow Microphone, then tap Talk again. (" + e.name + ")", true);
-    return;
-  }
+  try { await navigator.mediaDevices.getUserMedia({ audio: true }); }
+  catch (e) { starting = false; btn.className = ""; btn.textContent = "Talk"; show("The microphone is blocked. Tap the lock next to the web address, allow Microphone, then tap Talk again. (" + e.name + ")", true); return; }
   try {
     convo = await Conversation.startSession({
       agentId: AGENT,
       connectionType: "websocket",
-      onConnect: () => { diag("connected"); btn.className = "on"; btn.textContent = "End"; show("Connected. Just talk. You can talk over him."); },
-      onDisconnect: () => { convo = null; btn.className = ""; btn.textContent = "Talk"; show("Call ended. Tap Talk to start again."); },
-      onError: (m) => show("Steve's line had a problem: " + (m && m.message ? m.message : m), true),
+      onConnect: () => { diag("connected"); keepAwake(); off.hidden = false; btn.className = "on"; btn.textContent = "End"; show('Connected. Just talk. Say "bye Steve" to hang up.'); },
+      onDisconnect: (d) => {
+        const why = d && d.reason ? d.reason : "unknown"; diag("disconnected", why);
+        convo = null;
+        if (why === "error" && !endedByUser) { show("Line dropped. Reconnecting..."); setTimeout(start, 1500); return; }
+        listenForWake();
+      },
+      onError: (m) => diag("line-error", m && m.message ? m.message : m),
       onMessage: (m) => { if (m && m.message) said.textContent = (m.source === "user" ? "You: " : "Steve: ") + m.message; },
-      onModeChange: (m) => { if (convo && m && m.mode) show(m.mode === "speaking" ? "Steve is talking..." : "Listening..."); }
+      onModeChange: (m) => { if (convo && m && m.mode) show(m.mode === "speaking" ? "Steve is talking..." : 'Listening... (say "bye Steve" to hang up)'); }
     });
   } catch (e) {
     convo = null; btn.className = ""; btn.textContent = "Talk";
-    show("Couldn't reach Steve: " + (e && e.message ? e.message : e) + ". Check the phone has internet and tap Talk again.", true);
+    show("Couldn't reach Steve: " + (e && e.message ? e.message : e) + ". Tap Talk to try again.", true);
   }
+  starting = false;
 }
+
 btn.addEventListener("click", async () => {
-  if (convo) { try { await convo.endSession(); } catch (e) {} convo = null; btn.className = ""; btn.textContent = "Talk"; show("Call ended."); }
-  else start();
+  if (convo) { endedByUser = true; try { await convo.endSession(); } catch (e) {} return; }
+  start();
 });
+off.addEventListener("click", async () => { endedByUser = true; if (convo) { try { await convo.endSession(); } catch (e) {} } stopAll(); });
+
+try {
+  const p = await navigator.permissions.query({ name: "microphone" });
+  if (p.state === "granted") { show('Ready. Tap anywhere once, then just say "Hey Steve" from now on.'); document.body.addEventListener("click", function once(ev) { document.body.removeEventListener("click", once); if (ev.target === btn || ev.target === off) return; start(); }); }
+} catch (e) {}
 </script>
 </body>
 </html>
