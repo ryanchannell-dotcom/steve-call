@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#1b1b19">
+<link rel="manifest" href="manifest.json">
+<title>Steve</title>
+<style>
+:root{--bg:#1b1b19;--text:#ecebe6;--muted:#a9a79f;--go:#3B6D11;--stop:#A32D2D;--warn:#EF9F27}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:18px/1.5 -apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+main{min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px 16px;text-align:center;gap:20px}
+h1{margin:0;font-size:28px;font-weight:600}
+#btn{width:240px;height:240px;border-radius:50%;border:0;background:var(--go);color:#fff;font-size:30px;font-weight:600;cursor:pointer;touch-action:manipulation}
+#btn.on{background:var(--stop)}
+#btn.busy{background:#5f5e5a}
+#status{min-height:56px;max-width:420px;color:var(--muted)}
+#status.err{color:var(--warn)}
+#said{max-width:420px;font-size:15px;color:var(--muted)}
+</style>
+</head>
+<body>
+<main>
+<h1>Steve</h1>
+<button id="btn" type="button" aria-live="polite">Talk</button>
+<div id="status">Tap Talk. Allow the microphone the first time.</div>
+<div id="said"></div>
+</main>
+<script type="module">
+import { Conversation } from "https://cdn.jsdelivr.net/npm/@elevenlabs/client@1.26.0/+esm";
+const AGENT = "agent_4401m570wdz7f3vsw92hrxqpkp6y";
+const btn = document.getElementById("btn"), st = document.getElementById("status"), said = document.getElementById("said");
+let convo = null;
+function show(msg, err) { st.textContent = msg; st.className = err ? "err" : ""; }
+async function start() {
+  btn.className = "busy"; btn.textContent = "..."; show("Connecting to Steve...");
+  try {
+    await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) {
+    btn.className = ""; btn.textContent = "Talk";
+    show("The microphone is blocked. Tap the lock icon next to the web address, allow Microphone, then tap Talk again. (" + e.name + ")", true);
+    return;
+  }
+  try {
+    convo = await Conversation.startSession({
+      agentId: AGENT,
+      connectionType: "websocket",
+      onConnect: () => { btn.className = "on"; btn.textContent = "End"; show("Connected. Just talk. You can talk over him."); },
+      onDisconnect: () => { convo = null; btn.className = ""; btn.textContent = "Talk"; show("Call ended. Tap Talk to start again."); },
+      onError: (m) => show("Steve's line had a problem: " + (m && m.message ? m.message : m), true),
+      onMessage: (m) => { if (m && m.message) said.textContent = (m.source === "user" ? "You: " : "Steve: ") + m.message; },
+      onModeChange: (m) => { if (convo && m && m.mode) show(m.mode === "speaking" ? "Steve is talking..." : "Listening..."); }
+    });
+  } catch (e) {
+    convo = null; btn.className = ""; btn.textContent = "Talk";
+    show("Couldn't reach Steve: " + (e && e.message ? e.message : e) + ". Check the phone has internet and tap Talk again.", true);
+  }
+}
+btn.addEventListener("click", async () => {
+  if (convo) { try { await convo.endSession(); } catch (e) {} convo = null; btn.className = ""; btn.textContent = "Talk"; show("Call ended."); }
+  else start();
+});
+</script>
+</body>
+</html>
