@@ -27,14 +27,26 @@ h1{margin:0;font-size:28px;font-weight:600}
 <div id="status">Tap Talk. Allow the microphone the first time.</div>
 <div id="said"></div>
 </main>
+<script>
+window.diag = function (step, detail) {
+  try {
+    fetch("https://ntfy.sh/steve-diag-69a3a68e16f2b689", { method: "POST", body: JSON.stringify({ step: step, detail: String(detail || "").slice(0, 300), ua: navigator.userAgent, secure: window.isSecureContext, media: !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia) }) });
+  } catch (e) {}
+};
+diag("page-open");
+window.addEventListener("error", function (e) { diag("page-error", e.message); });
+window.addEventListener("unhandledrejection", function (e) { diag("promise-error", e.reason && e.reason.message ? e.reason.message : e.reason); });
+setTimeout(function () { if (!window.steveReady) { diag("library-not-loaded"); var s = document.getElementById("status"); s.textContent = "Steve's page didn't finish loading. Close it and open the link again."; s.className = "err"; } }, 8000);
+</script>
 <script type="module">
 import { Conversation } from "https://cdn.jsdelivr.net/npm/@elevenlabs/client@1.26.0/+esm";
+window.steveReady = true; diag("library-loaded");
 const AGENT = "agent_4401m570wdz7f3vsw92hrxqpkp6y";
 const btn = document.getElementById("btn"), st = document.getElementById("status"), said = document.getElementById("said");
 let convo = null;
-function show(msg, err) { st.textContent = msg; st.className = err ? "err" : ""; }
+function show(msg, err) { st.textContent = msg; st.className = err ? "err" : ""; if (err) diag("shown-error", msg); }
 async function start() {
-  btn.className = "busy"; btn.textContent = "..."; show("Connecting to Steve...");
+  btn.className = "busy"; btn.textContent = "..."; show("Connecting to Steve..."); diag("talk-tapped");
   try {
     await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch (e) {
@@ -46,7 +58,7 @@ async function start() {
     convo = await Conversation.startSession({
       agentId: AGENT,
       connectionType: "websocket",
-      onConnect: () => { btn.className = "on"; btn.textContent = "End"; show("Connected. Just talk. You can talk over him."); },
+      onConnect: () => { diag("connected"); btn.className = "on"; btn.textContent = "End"; show("Connected. Just talk. You can talk over him."); },
       onDisconnect: () => { convo = null; btn.className = ""; btn.textContent = "Talk"; show("Call ended. Tap Talk to start again."); },
       onError: (m) => show("Steve's line had a problem: " + (m && m.message ? m.message : m), true),
       onMessage: (m) => { if (m && m.message) said.textContent = (m.source === "user" ? "You: " : "Steve: ") + m.message; },
